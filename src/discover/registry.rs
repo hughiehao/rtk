@@ -18,6 +18,54 @@ pub enum Classification {
     Ignored,
 }
 
+fn matched_rule_index(cmd: &str) -> Option<usize> {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let stripped = ENV_PREFIX.replace(trimmed, "");
+    let cmd_clean = stripped.trim();
+    if cmd_clean.is_empty() {
+        return None;
+    }
+
+    let matches: Vec<usize> = REGEX_SET.matches(cmd_clean).into_iter().collect();
+    matches.last().copied()
+}
+
+pub fn matched_rule_id(cmd: &str) -> Option<String> {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = if trimmed.starts_with("rtk ") {
+        trimmed.trim_start_matches("rtk ").trim_start()
+    } else {
+        trimmed
+    };
+
+    let idx = matched_rule_index(normalized)?;
+    let rule = &RULES[idx];
+    let stripped = ENV_PREFIX.replace(normalized, "");
+    let cmd_clean = stripped.trim();
+
+    let subcmd = COMPILED[idx].captures(cmd_clean).and_then(|caps| {
+        let capture = match rule.rule_id {
+            "git" | "gh" | "cargo" | "docker" | "kubectl" | "go" | "ruff" | "pip" => caps.get(1),
+            _ => None,
+        }?;
+
+        Some(capture.as_str().replace(' ', "-"))
+    });
+
+    Some(match subcmd {
+        Some(subcmd) if !subcmd.is_empty() => format!("{}.{}", rule.rule_id, subcmd),
+        _ => rule.rule_id.to_string(),
+    })
+}
+
 /// Average token counts per category for estimation when no output_len available.
 pub fn category_avg_tokens(category: &str, subcmd: &str) -> usize {
     match category {

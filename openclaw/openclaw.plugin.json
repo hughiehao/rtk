@@ -1,0 +1,24 @@
+{
+  "id": "rtk-rewrite",
+  "name": "RTK OpenClaw Rewrite",
+  "version": "0.27.1",
+  "description": "Transparent RTK rewrite integration for OpenClaw exec tool",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "verbose": {
+        "type": "boolean",
+        "default": false
+      },
+      "rtkPath": {
+        "type": "string",
+        "default": "rtk"
+      }
+    }
+  }
+}

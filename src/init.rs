@@ -8,6 +8,9 @@ use crate::integrity;
 
 // Embedded hook script (guards before set -euo pipefail)
 const REWRITE_HOOK: &str = include_str!("../hooks/rtk-rewrite.sh");
+const OPENCLAW_PLUGIN: &str = include_str!("../openclaw/index.ts");
+const OPENCLAW_PLUGIN_MANIFEST: &str = include_str!("../openclaw/openclaw.plugin.json");
+const OPENCLAW_PLUGIN_README: &str = include_str!("../openclaw/README.md");
 
 // Embedded slim RTK awareness instructions
 const RTK_SLIM: &str = include_str!("../hooks/rtk-awareness.md");
@@ -170,9 +173,14 @@ pub fn run(
     global: bool,
     claude_md: bool,
     hook_only: bool,
+    openclaw: bool,
     patch_mode: PatchMode,
     verbose: u8,
 ) -> Result<()> {
+    if openclaw {
+        return run_openclaw_mode(global, verbose);
+    }
+
     // Mode selection
     match (claude_md, hook_only) {
         (true, _) => run_claude_md_mode(global, verbose),
@@ -189,6 +197,60 @@ fn prepare_hook_paths() -> Result<(PathBuf, PathBuf)> {
         .with_context(|| format!("Failed to create hook directory: {}", hook_dir.display()))?;
     let hook_path = hook_dir.join("rtk-rewrite.sh");
     Ok((hook_dir, hook_path))
+}
+
+fn resolve_openclaw_dir() -> Result<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".openclaw"))
+        .context("Cannot determine home directory. Is $HOME set?")
+}
+
+fn prepare_openclaw_plugin_paths() -> Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
+    let root = resolve_openclaw_dir()?;
+    let plugin_dir = root.join("extensions").join("rtk-rewrite");
+    fs::create_dir_all(&plugin_dir).with_context(|| {
+        format!(
+            "Failed to create OpenClaw plugin directory: {}",
+            plugin_dir.display()
+        )
+    })?;
+
+    Ok((
+        plugin_dir.clone(),
+        plugin_dir.join("index.ts"),
+        plugin_dir.join("openclaw.plugin.json"),
+        plugin_dir.join("README.md"),
+    ))
+}
+
+fn run_openclaw_mode(_global: bool, verbose: u8) -> Result<()> {
+    let (plugin_dir, index_path, manifest_path, readme_path) = prepare_openclaw_plugin_paths()?;
+
+    write_if_changed(&index_path, OPENCLAW_PLUGIN, "OpenClaw plugin", verbose)?;
+    write_if_changed(
+        &manifest_path,
+        OPENCLAW_PLUGIN_MANIFEST,
+        "OpenClaw plugin manifest",
+        verbose,
+    )?;
+    write_if_changed(
+        &readme_path,
+        OPENCLAW_PLUGIN_README,
+        "OpenClaw plugin README",
+        verbose,
+    )?;
+
+    println!("\nRTK OpenClaw plugin installed.\n");
+    println!("  Plugin dir: {}", plugin_dir.display());
+    println!("  Entry:      {}", index_path.display());
+    println!("  Manifest:   {}", manifest_path.display());
+    println!("\n  Next steps:");
+    println!("  1. Ensure `rtk` is available on PATH for OpenClaw.");
+    println!("  2. Restart OpenClaw or reload plugins.");
+    println!("  3. Test with an exec command such as: git status");
+    println!();
+
+    Ok(())
 }
 
 /// Write hook file if missing or outdated, return true if changed
@@ -1009,10 +1071,19 @@ fn resolve_claude_dir() -> Result<PathBuf> {
 /// Show current rtk configuration
 pub fn show_config() -> Result<()> {
     let claude_dir = resolve_claude_dir()?;
+    let openclaw_dir = resolve_openclaw_dir()?;
     let hook_path = claude_dir.join("hooks").join("rtk-rewrite.sh");
     let rtk_md_path = claude_dir.join("RTK.md");
     let global_claude_md = claude_dir.join("CLAUDE.md");
     let local_claude_md = PathBuf::from("CLAUDE.md");
+    let openclaw_plugin = openclaw_dir
+        .join("extensions")
+        .join("rtk-rewrite")
+        .join("index.ts");
+    let openclaw_manifest = openclaw_dir
+        .join("extensions")
+        .join("rtk-rewrite")
+        .join("openclaw.plugin.json");
 
     println!("📋 rtk Configuration:\n");
 
@@ -1141,11 +1212,21 @@ pub fn show_config() -> Result<()> {
         println!("⚪ settings.json: not found");
     }
 
+    if openclaw_plugin.exists() && openclaw_manifest.exists() {
+        println!(
+            "✅ OpenClaw: plugin installed at {}",
+            openclaw_plugin.display()
+        );
+    } else {
+        println!("⚪ OpenClaw: plugin not installed");
+    }
+
     println!("\nUsage:");
     println!("  rtk init              # Full injection into local CLAUDE.md");
     println!("  rtk init -g           # Hook + RTK.md + @RTK.md + settings.json (recommended)");
     println!("  rtk init -g --auto-patch    # Same as above but no prompt");
     println!("  rtk init -g --no-patch      # Skip settings.json (manual setup)");
+    println!("  rtk init --openclaw         # Install OpenClaw exec rewrite plugin");
     println!("  rtk init -g --uninstall     # Remove all RTK artifacts");
     println!("  rtk init -g --claude-md     # Legacy: full injection into ~/.claude/CLAUDE.md");
     println!("  rtk init -g --hook-only     # Hook only, no RTK.md");

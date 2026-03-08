@@ -1,124 +1,140 @@
-#!/bin/sh
-# rtk installer - https://github.com/rtk-ai/rtk
-# Usage: curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+#!/bin/bash
 
-set -e
+set -euo pipefail
 
-REPO="rtk-ai/rtk"
-BINARY_NAME="rtk"
-INSTALL_DIR="${RTK_INSTALL_DIR:-$HOME/.local/bin}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_PATH="$INSTALL_DIR/rtk"
+HOST_MODE="none"
+SKIP_BUILD=0
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [--host none|claude|openclaw|both] [--skip-build]
 
-info() {
-    printf "${GREEN}[INFO]${NC} %s\n" "$1"
+Options:
+  --host MODE   Optional host setup after install (default: none)
+  --skip-build  Reuse existing target/release/rtk
+  -h, --help    Show this help
+
+Environment:
+  INSTALL_DIR   Binary install dir (default: ~/.local/bin)
+
+Examples:
+  ./install.sh
+  ./install.sh --host claude
+  ./install.sh --host openclaw
+  INSTALL_DIR=/usr/local/bin ./install.sh --host both
+EOF
 }
 
-warn() {
-    printf "${YELLOW}[WARN]${NC} %s\n" "$1"
+log() {
+    printf '[rtk-standalone] %s\n' "$1"
 }
 
-error() {
-    printf "${RED}[ERROR]${NC} %s\n" "$1"
+fail() {
+    printf '[rtk-standalone] error: %s\n' "$1" >&2
     exit 1
 }
 
-# Detect OS
-detect_os() {
-    case "$(uname -s)" in
-        Linux*)  OS="linux";;
-        Darwin*) OS="darwin";;
-        *)       error "Unsupported operating system: $(uname -s)";;
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --host)
+                [[ $# -ge 2 ]] || fail "--host requires a value"
+                HOST_MODE="$2"
+                shift 2
+                ;;
+            --skip-build)
+                SKIP_BUILD=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                fail "unknown argument: $1"
+                ;;
+        esac
+    done
+
+    case "$HOST_MODE" in
+        none|claude|openclaw|both) ;;
+        *) fail "invalid --host value: $HOST_MODE" ;;
     esac
 }
 
-# Detect architecture
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64|amd64)  ARCH="x86_64";;
-        arm64|aarch64) ARCH="aarch64";;
-        *)             error "Unsupported architecture: $(uname -m)";;
-    esac
-}
+build_binary() {
+    require_cmd cargo
 
-# Get latest release version
-get_latest_version() {
-    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [ -z "$VERSION" ]; then
-        error "Failed to get latest version"
-    fi
-}
-
-# Build target triple
-get_target() {
-    case "$OS" in
-        linux)
-            case "$ARCH" in
-                x86_64)  TARGET="x86_64-unknown-linux-musl";;
-                aarch64) TARGET="aarch64-unknown-linux-gnu";;
-            esac
-            ;;
-        darwin)
-            TARGET="${ARCH}-apple-darwin"
-            ;;
-    esac
-}
-
-# Download and install
-install() {
-    info "Detected: $OS $ARCH"
-    info "Target: $TARGET"
-    info "Version: $VERSION"
-
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}-${TARGET}.tar.gz"
-    TEMP_DIR=$(mktemp -d)
-    ARCHIVE="${TEMP_DIR}/${BINARY_NAME}.tar.gz"
-
-    info "Downloading from: $DOWNLOAD_URL"
-    if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"; then
-        error "Failed to download binary"
+    if [[ "$SKIP_BUILD" -eq 1 ]]; then
+        [[ -x "$SCRIPT_DIR/target/release/rtk" ]] || fail "target/release/rtk not found; remove --skip-build or build first"
+        return
     fi
 
-    info "Extracting..."
-    tar -xzf "$ARCHIVE" -C "$TEMP_DIR"
+    log "building release binary"
+    cargo build --release --manifest-path "$SCRIPT_DIR/Cargo.toml"
+}
 
+install_binary() {
     mkdir -p "$INSTALL_DIR"
-    mv "${TEMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/"
-
-    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
-
-    # Cleanup
-    rm -rf "$TEMP_DIR"
-
-    info "Successfully installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
+    install -m 755 "$SCRIPT_DIR/target/release/rtk" "$INSTALL_PATH"
+    log "installed binary: $INSTALL_PATH"
 }
 
-# Verify installation
-verify() {
-    if command -v "$BINARY_NAME" >/dev/null 2>&1; then
-        info "Verification: $($BINARY_NAME --version)"
-    else
-        warn "Binary installed but not in PATH. Add to your shell profile:"
-        warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    fi
+check_path() {
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ;;
+        *)
+            log "warning: $INSTALL_DIR is not on PATH"
+            log "add this to your shell profile: export PATH=\"$INSTALL_DIR:\$PATH\""
+            ;;
+    esac
+}
+
+init_claude() {
+    require_cmd jq
+    log "installing Claude integration"
+    "$INSTALL_PATH" init --global
+}
+
+init_openclaw() {
+    log "installing OpenClaw integration"
+    "$INSTALL_PATH" init --openclaw
+}
+
+run_host_init() {
+    case "$HOST_MODE" in
+        none) ;;
+        claude) init_claude ;;
+        openclaw) init_openclaw ;;
+        both)
+            init_claude
+            init_openclaw
+            ;;
+    esac
+}
+
+verify_install() {
+    log "verifying binary"
+    "$INSTALL_PATH" --version
+    "$INSTALL_PATH" gain >/dev/null
+    "$INSTALL_PATH" init --show || true
 }
 
 main() {
-    info "Installing $BINARY_NAME..."
-
-    detect_os
-    detect_arch
-    get_target
-    get_latest_version
-    install
-    verify
-
-    echo ""
-    info "Installation complete! Run '$BINARY_NAME --help' to get started."
+    parse_args "$@"
+    build_binary
+    install_binary
+    check_path
+    run_host_init
+    verify_install
+    log "done"
 }
 
-main
+main "$@"

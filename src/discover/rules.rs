@@ -2,6 +2,7 @@ use super::report::RtkStatus;
 
 /// A rule mapping a shell command pattern to its RTK equivalent.
 pub struct RtkRule {
+    pub rule_id: &'static str,
     pub rtk_cmd: &'static str,
     /// Original command prefixes to replace with rtk_cmd (longest first for correct matching).
     pub rewrite_prefixes: &'static [&'static str],
@@ -52,6 +53,7 @@ pub const PATTERNS: &[&str] = &[
 
 pub const RULES: &[RtkRule] = &[
     RtkRule {
+        rule_id: "git",
         rtk_cmd: "rtk git",
         rewrite_prefixes: &["git"],
         category: "Git",
@@ -65,6 +67,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "gh",
         rtk_cmd: "rtk gh",
         rewrite_prefixes: &["gh"],
         category: "GitHub",
@@ -73,6 +76,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "cargo",
         rtk_cmd: "rtk cargo",
         rewrite_prefixes: &["cargo"],
         category: "Cargo",
@@ -81,6 +85,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[("fmt", RtkStatus::Passthrough)],
     },
     RtkRule {
+        rule_id: "pnpm",
         rtk_cmd: "rtk pnpm",
         rewrite_prefixes: &["pnpm"],
         category: "PackageManager",
@@ -89,6 +94,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "npm",
         rtk_cmd: "rtk npm",
         rewrite_prefixes: &["npm"],
         category: "PackageManager",
@@ -97,6 +103,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "npx",
         rtk_cmd: "rtk npx",
         rewrite_prefixes: &["npx"],
         category: "PackageManager",
@@ -105,6 +112,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "read",
         rtk_cmd: "rtk read",
         rewrite_prefixes: &["cat", "head", "tail"],
         category: "Files",
@@ -113,6 +121,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "grep",
         rtk_cmd: "rtk grep",
         rewrite_prefixes: &["rg", "grep"],
         category: "Files",
@@ -121,6 +130,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "ls",
         rtk_cmd: "rtk ls",
         rewrite_prefixes: &["ls"],
         category: "Files",
@@ -129,6 +139,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "find",
         rtk_cmd: "rtk find",
         rewrite_prefixes: &["find"],
         category: "Files",
@@ -137,6 +148,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "tsc",
         // Longest prefixes first for correct matching
         rtk_cmd: "rtk tsc",
         rewrite_prefixes: &["pnpm tsc", "npx tsc", "tsc"],
@@ -146,6 +158,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "lint",
         rtk_cmd: "rtk lint",
         rewrite_prefixes: &[
             "npx eslint",
@@ -161,6 +174,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "prettier",
         rtk_cmd: "rtk prettier",
         rewrite_prefixes: &["npx prettier", "pnpm prettier", "prettier"],
         category: "Build",
@@ -169,6 +183,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "next",
         // "next build" is stripped to "rtk next" — the build subcommand is internal
         rtk_cmd: "rtk next",
         rewrite_prefixes: &["npx next build", "pnpm next build", "next build"],
@@ -178,6 +193,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "vitest",
         rtk_cmd: "rtk vitest",
         rewrite_prefixes: &["pnpm vitest", "npx vitest", "vitest", "jest"],
         category: "Tests",
@@ -186,6 +202,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "playwright",
         rtk_cmd: "rtk playwright",
         rewrite_prefixes: &["npx playwright", "pnpm playwright", "playwright"],
         category: "Tests",
@@ -194,6 +211,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "prisma",
         rtk_cmd: "rtk prisma",
         rewrite_prefixes: &["npx prisma", "pnpm prisma", "prisma"],
         category: "Build",
@@ -202,6 +220,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "docker",
         rtk_cmd: "rtk docker",
         rewrite_prefixes: &["docker"],
         category: "Infra",
@@ -210,6 +229,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "kubectl",
         rtk_cmd: "rtk kubectl",
         rewrite_prefixes: &["kubectl"],
         category: "Infra",
@@ -218,6 +238,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "tree",
         rtk_cmd: "rtk tree",
         rewrite_prefixes: &["tree"],
         category: "Files",
@@ -226,6 +247,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "diff",
         rtk_cmd: "rtk diff",
         rewrite_prefixes: &["diff"],
         category: "Files",
@@ -234,6 +256,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "curl",
         rtk_cmd: "rtk curl",
         rewrite_prefixes: &["curl"],
         category: "Network",
@@ -242,6 +265,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "wget",
         rtk_cmd: "rtk wget",
         rewrite_prefixes: &["wget"],
         category: "Network",
@@ -250,6 +274,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "mypy",
         rtk_cmd: "rtk mypy",
         rewrite_prefixes: &["python3 -m mypy", "python -m mypy", "mypy"],
         category: "Build",
@@ -259,6 +284,7 @@ pub const RULES: &[RtkRule] = &[
     },
     // Python tooling
     RtkRule {
+        rule_id: "ruff",
         rtk_cmd: "rtk ruff",
         rewrite_prefixes: &["ruff"],
         category: "Python",
@@ -267,6 +293,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "pytest",
         rtk_cmd: "rtk pytest",
         rewrite_prefixes: &["python -m pytest", "pytest"],
         category: "Python",
@@ -275,6 +302,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "pip",
         rtk_cmd: "rtk pip",
         rewrite_prefixes: &["pip3", "pip", "uv pip"],
         category: "Python",
@@ -284,6 +312,7 @@ pub const RULES: &[RtkRule] = &[
     },
     // Go tooling
     RtkRule {
+        rule_id: "go",
         rtk_cmd: "rtk go",
         rewrite_prefixes: &["go"],
         category: "Go",
@@ -292,6 +321,7 @@ pub const RULES: &[RtkRule] = &[
         subcmd_status: &[],
     },
     RtkRule {
+        rule_id: "golangci-lint",
         rtk_cmd: "rtk golangci-lint",
         rewrite_prefixes: &["golangci-lint", "golangci"],
         category: "Go",
@@ -301,6 +331,7 @@ pub const RULES: &[RtkRule] = &[
     },
     // AWS CLI
     RtkRule {
+        rule_id: "aws",
         rtk_cmd: "rtk aws",
         rewrite_prefixes: &["aws"],
         category: "Infra",
@@ -310,6 +341,7 @@ pub const RULES: &[RtkRule] = &[
     },
     // PostgreSQL
     RtkRule {
+        rule_id: "psql",
         rtk_cmd: "rtk psql",
         rewrite_prefixes: &["psql"],
         category: "Infra",

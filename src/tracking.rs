@@ -48,6 +48,16 @@ fn current_project_path_string() -> String {
         .unwrap_or_default()
 }
 
+fn env_context(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn current_host_context() -> String {
+    env_context("RTK_HOST").unwrap_or_else(|| "local".to_string())
+}
+
 /// Build SQL filter params for project-scoped queries.
 /// Returns (exact_match, glob_prefix) for WHERE clause.
 /// Uses GLOB instead of LIKE to avoid `_` and `%` in paths acting as wildcards. // changed: GLOB
@@ -260,7 +270,12 @@ impl Tracker {
                 input_tokens INTEGER NOT NULL,
                 output_tokens INTEGER NOT NULL,
                 saved_tokens INTEGER NOT NULL,
-                savings_pct REAL NOT NULL
+                savings_pct REAL NOT NULL,
+                host TEXT DEFAULT 'local',
+                session_key TEXT DEFAULT '',
+                agent_id TEXT DEFAULT '',
+                tool_name TEXT DEFAULT '',
+                matched_rule TEXT DEFAULT ''
             )",
             [],
         )?;
@@ -273,6 +288,26 @@ impl Tracker {
         // Migration: add exec_time_ms column if it doesn't exist
         let _ = conn.execute(
             "ALTER TABLE commands ADD COLUMN exec_time_ms INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE commands ADD COLUMN host TEXT DEFAULT 'local'",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE commands ADD COLUMN session_key TEXT DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE commands ADD COLUMN agent_id TEXT DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE commands ADD COLUMN tool_name TEXT DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE commands ADD COLUMN matched_rule TEXT DEFAULT ''",
             [],
         );
         // Migration: add project_path column with DEFAULT '' for new rows // changed: added DEFAULT
@@ -356,10 +391,15 @@ impl Tracker {
         };
 
         let project_path = current_project_path_string(); // added: record cwd
+        let host = current_host_context();
+        let session_key = env_context("RTK_SESSION_KEY").unwrap_or_default();
+        let agent_id = env_context("RTK_AGENT_ID").unwrap_or_default();
+        let tool_name = env_context("RTK_TOOL_NAME").unwrap_or_default();
+        let matched_rule = env_context("RTK_MATCHED_RULE").unwrap_or_default();
 
         self.conn.execute(
-            "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", // added: project_path
+            "INSERT INTO commands (timestamp, original_cmd, rtk_cmd, project_path, input_tokens, output_tokens, saved_tokens, savings_pct, exec_time_ms, host, session_key, agent_id, tool_name, matched_rule)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 Utc::now().to_rfc3339(),
                 original_cmd,
@@ -369,7 +409,12 @@ impl Tracker {
                 output_tokens as i64,
                 saved as i64,
                 pct,
-                exec_time_ms as i64
+                exec_time_ms as i64,
+                host,
+                session_key,
+                agent_id,
+                tool_name,
+                matched_rule,
             ],
         )?;
 
@@ -1166,6 +1211,14 @@ pub fn track(original_cmd: &str, rtk_cmd: &str, input: &str, output: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env test lock")
+    }
 
     // 1. estimate_tokens — verify ~4 chars/token ratio
     #[test]
@@ -1293,6 +1346,8 @@ mod tests {
     fn test_custom_db_path_env() {
         use std::env;
 
+        let _guard = env_test_lock();
+
         let custom_path = "/tmp/rtk_test_custom.db";
         env::set_var("RTK_DB_PATH", custom_path);
 
@@ -1302,10 +1357,42 @@ mod tests {
         env::remove_var("RTK_DB_PATH");
     }
 
+    #[test]
+    fn test_env_context_filters_empty_values() {
+        use std::env;
+
+        let _guard = env_test_lock();
+
+        env::set_var("RTK_TEST_ENV_CONTEXT", "openclaw");
+        assert_eq!(env_context("RTK_TEST_ENV_CONTEXT"), Some("openclaw".into()));
+
+        env::set_var("RTK_TEST_ENV_CONTEXT", "   ");
+        assert_eq!(env_context("RTK_TEST_ENV_CONTEXT"), None);
+
+        env::remove_var("RTK_TEST_ENV_CONTEXT");
+    }
+
+    #[test]
+    fn test_current_host_context_defaults_and_reads_env() {
+        use std::env;
+
+        let _guard = env_test_lock();
+
+        env::remove_var("RTK_HOST");
+        assert_eq!(current_host_context(), "local");
+
+        env::set_var("RTK_HOST", "openclaw");
+        assert_eq!(current_host_context(), "openclaw");
+
+        env::remove_var("RTK_HOST");
+    }
+
     // 8. get_db_path falls back to default when no custom config
     #[test]
     fn test_default_db_path() {
         use std::env;
+
+        let _guard = env_test_lock();
 
         // Ensure no env var is set
         env::remove_var("RTK_DB_PATH");

@@ -323,6 +323,9 @@ enum Commands {
         #[arg(long = "hook-only", group = "mode")]
         hook_only: bool,
 
+        #[arg(long, group = "mode")]
+        openclaw: bool,
+
         /// Auto-patch settings.json without prompting
         #[arg(long = "auto-patch", group = "patch")]
         auto_patch: bool,
@@ -619,6 +622,9 @@ enum Commands {
     Rewrite {
         /// Raw command to rewrite (e.g. "git status", "cargo test && git push")
         cmd: String,
+
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1410,6 +1416,7 @@ fn main() -> Result<()> {
             show,
             claude_md,
             hook_only,
+            openclaw,
             auto_patch,
             no_patch,
             uninstall,
@@ -1426,7 +1433,14 @@ fn main() -> Result<()> {
                 } else {
                     init::PatchMode::Ask
                 };
-                init::run(global, claude_md, hook_only, patch_mode, cli.verbose)?;
+                init::run(
+                    global,
+                    claude_md,
+                    hook_only,
+                    openclaw,
+                    patch_mode,
+                    cli.verbose,
+                )?;
             }
         }
 
@@ -1761,8 +1775,8 @@ fn main() -> Result<()> {
             hook_audit_cmd::run(since, cli.verbose)?;
         }
 
-        Commands::Rewrite { cmd } => {
-            rewrite_cmd::run(&cmd)?;
+        Commands::Rewrite { cmd, json } => {
+            rewrite_cmd::run(&cmd, json)?;
         }
 
         Commands::Proxy { args } => {

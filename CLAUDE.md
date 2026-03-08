@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a fork with critical fixes for git argument parsing and modern JavaScript stack support (pnpm, vitest, Next.js, TypeScript, Playwright, Prisma).
 
+Current package version: **0.27.3**.
+
 ### ⚠️ Name Collision Warning
 
 **Two different "rtk" projects exist:**
@@ -16,7 +18,7 @@ This is a fork with critical fixes for git argument parsing and modern JavaScrip
 
 **Verify correct installation:**
 ```bash
-rtk --version  # Should show "rtk 0.27.1" (or newer)
+rtk --version  # Should show "rtk 0.27.3" (or newer)
 rtk gain       # Should show token savings stats (NOT "command not found")
 ```
 

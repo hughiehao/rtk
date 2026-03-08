@@ -2,6 +2,8 @@
 
 This directory is a self-contained RTK source project that includes the files required to build the current RTK binary with Claude and OpenClaw integration support.
 
+Current packaged version: **0.27.3**.
+
 ## Included
 
 - `Cargo.toml`, `Cargo.lock`
@@ -50,6 +52,10 @@ Install and initialize both:
 ```bash
 ./install.sh --host both
 ```
+
+## Supported command families
+
+This standalone build includes RTK support for Rust, Git, GitHub CLI, JavaScript/TypeScript, Python, and Go workflows, including `ruff`, `pytest`, `pip`, `go`, and `golangci` commands.
 
 ## Requirements
 

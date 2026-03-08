@@ -2,7 +2,7 @@
 
 This directory is a self-contained RTK source project that includes the files required to build the current RTK binary with Claude and OpenClaw integration support.
 
-Current packaged version: **0.27.3**.
+Current packaged version: **0.27.4**.
 
 ## Included
 

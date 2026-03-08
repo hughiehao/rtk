@@ -2,7 +2,7 @@
 
 > **rtk (Rust Token Killer)** - A high-performance CLI proxy that minimizes LLM token consumption through intelligent output filtering and compression.
 
-Current documented package version: **0.27.3**.
+Current documented package version: **0.27.4**.
 
 This document provides a comprehensive architectural overview of rtk, including system design, data flows, module organization, and implementation patterns.
 
@@ -1490,4 +1490,4 @@ When implementing a new command, consider:
 
 **Last Updated**: 2026-02-22
 **Architecture Version**: 2.2
-**rtk Version**: 0.27.3
+**rtk Version**: 0.27.4

@@ -305,9 +305,9 @@ enum Commands {
         extra_args: Vec<String>,
     },
 
-    /// Initialize rtk instructions in CLAUDE.md
+    /// Initialize Claude Code integration
     Init {
-        /// Add to global ~/.claude/CLAUDE.md instead of local
+        /// Use global ~/.claude instead of the current project
         #[arg(short, long)]
         global: bool,
 
@@ -334,7 +334,7 @@ enum Commands {
         #[arg(long = "no-patch", group = "patch")]
         no_patch: bool,
 
-        /// Remove all RTK artifacts (hook, RTK.md, CLAUDE.md reference, settings.json entry)
+        /// Remove installed RTK artifacts
         #[arg(long)]
         uninstall: bool,
     },

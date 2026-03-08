@@ -32,6 +32,12 @@ pub enum PatchResult {
     Skipped,        // --no-patch flag used
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallScope {
+    Global,
+    ProjectLocal,
+}
+
 // Legacy full instructions for backward compatibility (--claude-md mode)
 const RTK_INSTRUCTIONS: &str = r##"<!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
@@ -190,13 +196,51 @@ pub fn run(
 }
 
 /// Prepare hook directory and return paths (hook_dir, hook_path)
-fn prepare_hook_paths() -> Result<(PathBuf, PathBuf)> {
-    let claude_dir = resolve_claude_dir()?;
+fn prepare_hook_paths(scope: InstallScope) -> Result<(PathBuf, PathBuf)> {
+    let claude_dir = resolve_claude_dir(scope)?;
     let hook_dir = claude_dir.join("hooks");
     fs::create_dir_all(&hook_dir)
         .with_context(|| format!("Failed to create hook directory: {}", hook_dir.display()))?;
     let hook_path = hook_dir.join("rtk-rewrite.sh");
     Ok((hook_dir, hook_path))
+}
+
+fn resolve_project_dir() -> Result<PathBuf> {
+    std::env::current_dir().context("Cannot determine current project directory")
+}
+
+fn resolve_claude_dir(scope: InstallScope) -> Result<PathBuf> {
+    match scope {
+        InstallScope::Global => dirs::home_dir()
+            .map(|h| h.join(".claude"))
+            .context("Cannot determine home directory. Is $HOME set?"),
+        InstallScope::ProjectLocal => Ok(resolve_project_dir()?.join(".claude")),
+    }
+}
+
+fn resolve_rtk_md_path(scope: InstallScope) -> Result<PathBuf> {
+    match scope {
+        InstallScope::Global => Ok(resolve_claude_dir(scope)?.join("RTK.md")),
+        InstallScope::ProjectLocal => Ok(resolve_project_dir()?.join("RTK.md")),
+    }
+}
+
+fn resolve_claude_md_path(scope: InstallScope) -> Result<PathBuf> {
+    match scope {
+        InstallScope::Global => Ok(resolve_claude_dir(scope)?.join("CLAUDE.md")),
+        InstallScope::ProjectLocal => Ok(resolve_project_dir()?.join("CLAUDE.md")),
+    }
+}
+
+fn settings_path_for(scope: InstallScope) -> Result<PathBuf> {
+    Ok(resolve_claude_dir(scope)?.join("settings.json"))
+}
+
+fn scope_label(scope: InstallScope) -> &'static str {
+    match scope {
+        InstallScope::Global => "global",
+        InstallScope::ProjectLocal => "project-local",
+    }
 }
 
 fn resolve_openclaw_dir() -> Result<PathBuf> {
@@ -384,8 +428,8 @@ fn prompt_user_consent(settings_path: &Path) -> Result<bool> {
 }
 
 /// Print manual instructions for settings.json patching
-fn print_manual_instructions(hook_path: &Path) {
-    println!("\n  MANUAL STEP: Add this to ~/.claude/settings.json:");
+fn print_manual_instructions(settings_path: &Path, hook_path: &Path) {
+    println!("\n  MANUAL STEP: Add this to {}:", settings_path.display());
     println!("  {{");
     println!("    \"hooks\": {{ \"PreToolUse\": [{{");
     println!("      \"matcher\": \"Bash\",");
@@ -430,9 +474,8 @@ fn remove_hook_from_json(root: &mut serde_json::Value) -> bool {
 
 /// Remove RTK hook from settings.json file
 /// Backs up before modification, returns true if hook was found and removed
-fn remove_hook_from_settings(verbose: u8) -> Result<bool> {
-    let claude_dir = resolve_claude_dir()?;
-    let settings_path = claude_dir.join("settings.json");
+fn remove_hook_from_settings(scope: InstallScope, verbose: u8) -> Result<bool> {
+    let settings_path = settings_path_for(scope)?;
 
     if !settings_path.exists() {
         if verbose > 0 {
@@ -474,11 +517,13 @@ fn remove_hook_from_settings(verbose: u8) -> Result<bool> {
 
 /// Full uninstall: remove hook, RTK.md, @RTK.md reference, settings.json entry
 pub fn uninstall(global: bool, verbose: u8) -> Result<()> {
-    if !global {
-        anyhow::bail!("Uninstall only works with --global flag. For local projects, manually remove RTK from CLAUDE.md");
-    }
+    let scope = if global {
+        InstallScope::Global
+    } else {
+        InstallScope::ProjectLocal
+    };
 
-    let claude_dir = resolve_claude_dir()?;
+    let claude_dir = resolve_claude_dir(scope)?;
     let mut removed = Vec::new();
 
     // 1. Remove hook file
@@ -495,7 +540,7 @@ pub fn uninstall(global: bool, verbose: u8) -> Result<()> {
     }
 
     // 2. Remove RTK.md
-    let rtk_md_path = claude_dir.join("RTK.md");
+    let rtk_md_path = resolve_rtk_md_path(scope)?;
     if rtk_md_path.exists() {
         fs::remove_file(&rtk_md_path)
             .with_context(|| format!("Failed to remove RTK.md: {}", rtk_md_path.display()))?;
@@ -503,7 +548,7 @@ pub fn uninstall(global: bool, verbose: u8) -> Result<()> {
     }
 
     // 3. Remove @RTK.md reference from CLAUDE.md
-    let claude_md_path = claude_dir.join("CLAUDE.md");
+    let claude_md_path = resolve_claude_md_path(scope)?;
     if claude_md_path.exists() {
         let content = fs::read_to_string(&claude_md_path)
             .with_context(|| format!("Failed to read CLAUDE.md: {}", claude_md_path.display()))?;
@@ -526,7 +571,7 @@ pub fn uninstall(global: bool, verbose: u8) -> Result<()> {
     }
 
     // 4. Remove hook entry from settings.json
-    if remove_hook_from_settings(verbose)? {
+    if remove_hook_from_settings(scope, verbose)? {
         removed.push("settings.json: removed RTK hook entry".to_string());
     }
 
@@ -546,9 +591,13 @@ pub fn uninstall(global: bool, verbose: u8) -> Result<()> {
 
 /// Orchestrator: patch settings.json with RTK hook
 /// Handles reading, checking, prompting, merging, backing up, and atomic writing
-fn patch_settings_json(hook_path: &Path, mode: PatchMode, verbose: u8) -> Result<PatchResult> {
-    let claude_dir = resolve_claude_dir()?;
-    let settings_path = claude_dir.join("settings.json");
+fn patch_settings_json(
+    scope: InstallScope,
+    hook_path: &Path,
+    mode: PatchMode,
+    verbose: u8,
+) -> Result<PatchResult> {
+    let settings_path = settings_path_for(scope)?;
     let hook_command = hook_path
         .to_str()
         .context("Hook path contains invalid UTF-8")?;
@@ -579,12 +628,12 @@ fn patch_settings_json(hook_path: &Path, mode: PatchMode, verbose: u8) -> Result
     // Handle mode
     match mode {
         PatchMode::Skip => {
-            print_manual_instructions(hook_path);
+            print_manual_instructions(&settings_path, hook_path);
             return Ok(PatchResult::Skipped);
         }
         PatchMode::Ask => {
             if !prompt_user_consent(&settings_path)? {
-                print_manual_instructions(hook_path);
+                print_manual_instructions(&settings_path, hook_path);
                 return Ok(PatchResult::Declined);
             }
         }
@@ -727,17 +776,17 @@ fn run_default_mode(_global: bool, _patch_mode: PatchMode, _verbose: u8) -> Resu
 
 #[cfg(unix)]
 fn run_default_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<()> {
-    if !global {
-        // Local init: unchanged behavior (full injection into ./CLAUDE.md)
-        return run_claude_md_mode(false, verbose);
-    }
+    let scope = if global {
+        InstallScope::Global
+    } else {
+        InstallScope::ProjectLocal
+    };
 
-    let claude_dir = resolve_claude_dir()?;
-    let rtk_md_path = claude_dir.join("RTK.md");
-    let claude_md_path = claude_dir.join("CLAUDE.md");
+    let rtk_md_path = resolve_rtk_md_path(scope)?;
+    let claude_md_path = resolve_claude_md_path(scope)?;
 
     // 1. Prepare hook directory and install hook
-    let (_hook_dir, hook_path) = prepare_hook_paths()?;
+    let (_hook_dir, hook_path) = prepare_hook_paths(scope)?;
     let hook_changed = ensure_hook_installed(&hook_path, verbose)?;
 
     // 2. Write RTK.md
@@ -752,7 +801,7 @@ fn run_default_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<
     } else {
         "already up to date"
     };
-    println!("\nRTK hook {} (global).\n", hook_status);
+    println!("\nRTK hook {} ({}).\n", hook_status, scope_label(scope));
     println!("  Hook:      {}", hook_path.display());
     println!("  RTK.md:    {} (10 lines)", rtk_md_path.display());
     println!("  CLAUDE.md: @RTK.md reference added");
@@ -763,7 +812,7 @@ fn run_default_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<
     }
 
     // 5. Patch settings.json
-    let patch_result = patch_settings_json(&hook_path, patch_mode, verbose)?;
+    let patch_result = patch_settings_json(scope, &hook_path, patch_mode, verbose)?;
 
     // Report result
     match patch_result {
@@ -792,14 +841,14 @@ fn run_hook_only_mode(_global: bool, _patch_mode: PatchMode, _verbose: u8) -> Re
 
 #[cfg(unix)]
 fn run_hook_only_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Result<()> {
-    if !global {
-        eprintln!("⚠️  Warning: --hook-only only makes sense with --global");
-        eprintln!("    For local projects, use default mode or --claude-md");
-        return Ok(());
-    }
+    let scope = if global {
+        InstallScope::Global
+    } else {
+        InstallScope::ProjectLocal
+    };
 
     // Prepare and install hook
-    let (_hook_dir, hook_path) = prepare_hook_paths()?;
+    let (_hook_dir, hook_path) = prepare_hook_paths(scope)?;
     let hook_changed = ensure_hook_installed(&hook_path, verbose)?;
 
     let hook_status = if hook_changed {
@@ -807,14 +856,18 @@ fn run_hook_only_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Resul
     } else {
         "already up to date"
     };
-    println!("\nRTK hook {} (hook-only mode).\n", hook_status);
+    println!(
+        "\nRTK hook {} (hook-only mode, {}).\n",
+        hook_status,
+        scope_label(scope)
+    );
     println!("  Hook: {}", hook_path.display());
     println!(
         "  Note: No RTK.md created. Claude won't know about meta commands (gain, discover, proxy)."
     );
 
     // Patch settings.json
-    let patch_result = patch_settings_json(&hook_path, patch_mode, verbose)?;
+    let patch_result = patch_settings_json(scope, &hook_path, patch_mode, verbose)?;
 
     // Report result
     match patch_result {
@@ -838,7 +891,7 @@ fn run_hook_only_mode(global: bool, patch_mode: PatchMode, verbose: u8) -> Resul
 /// Legacy mode: full 137-line injection into CLAUDE.md
 fn run_claude_md_mode(global: bool, verbose: u8) -> Result<()> {
     let path = if global {
-        resolve_claude_dir()?.join("CLAUDE.md")
+        resolve_claude_dir(InstallScope::Global)?.join("CLAUDE.md")
     } else {
         PathBuf::from("CLAUDE.md")
     };
@@ -1054,27 +1107,23 @@ fn remove_rtk_block(content: &str) -> (String, bool) {
         }
 
         eprintln!("    Action: Manually remove the incomplete block, then re-run:");
-        eprintln!("            rtk init -g");
+        eprintln!("            rtk init [--global]");
         (content.to_string(), false)
     } else {
         (content.to_string(), false)
     }
 }
 
-/// Resolve ~/.claude directory with proper home expansion
-fn resolve_claude_dir() -> Result<PathBuf> {
-    dirs::home_dir()
-        .map(|h| h.join(".claude"))
-        .context("Cannot determine home directory. Is $HOME set?")
-}
-
 /// Show current rtk configuration
 pub fn show_config() -> Result<()> {
-    let claude_dir = resolve_claude_dir()?;
+    let global_claude_dir = resolve_claude_dir(InstallScope::Global)?;
+    let project_claude_dir = resolve_claude_dir(InstallScope::ProjectLocal)?;
     let openclaw_dir = resolve_openclaw_dir()?;
-    let hook_path = claude_dir.join("hooks").join("rtk-rewrite.sh");
-    let rtk_md_path = claude_dir.join("RTK.md");
-    let global_claude_md = claude_dir.join("CLAUDE.md");
+    let hook_path = global_claude_dir.join("hooks").join("rtk-rewrite.sh");
+    let project_hook_path = project_claude_dir.join("hooks").join("rtk-rewrite.sh");
+    let rtk_md_path = global_claude_dir.join("RTK.md");
+    let project_rtk_md_path = resolve_project_dir()?.join("RTK.md");
+    let global_claude_md = global_claude_dir.join("CLAUDE.md");
     let local_claude_md = PathBuf::from("CLAUDE.md");
     let openclaw_plugin = openclaw_dir
         .join("extensions")
@@ -1134,11 +1183,23 @@ pub fn show_config() -> Result<()> {
         println!("⚪ Hook: not found");
     }
 
+    if project_hook_path.exists() {
+        println!("✅ Project hook: {}", project_hook_path.display());
+    } else {
+        println!("⚪ Project hook: not found");
+    }
+
     // Check RTK.md
     if rtk_md_path.exists() {
         println!("✅ RTK.md: {} (slim mode)", rtk_md_path.display());
     } else {
         println!("⚪ RTK.md: not found");
+    }
+
+    if project_rtk_md_path.exists() {
+        println!("✅ Project RTK.md: {}", project_rtk_md_path.display());
+    } else {
+        println!("⚪ Project RTK.md: not found");
     }
 
     // Check hook integrity
@@ -1180,8 +1241,10 @@ pub fn show_config() -> Result<()> {
     // Check local CLAUDE.md
     if local_claude_md.exists() {
         let content = fs::read_to_string(&local_claude_md)?;
-        if content.contains("rtk") {
-            println!("✅ Local (./CLAUDE.md): rtk enabled");
+        if content.contains("@RTK.md") {
+            println!("✅ Local (./CLAUDE.md): @RTK.md reference");
+        } else if content.contains("<!-- rtk-instructions") {
+            println!("✅ Local (./CLAUDE.md): legacy RTK block");
         } else {
             println!("⚪ Local (./CLAUDE.md): exists but rtk not configured");
         }
@@ -1190,7 +1253,7 @@ pub fn show_config() -> Result<()> {
     }
 
     // Check settings.json
-    let settings_path = claude_dir.join("settings.json");
+    let settings_path = global_claude_dir.join("settings.json");
     if settings_path.exists() {
         let content = fs::read_to_string(&settings_path)?;
         if !content.trim().is_empty() {
@@ -1212,6 +1275,28 @@ pub fn show_config() -> Result<()> {
         println!("⚪ settings.json: not found");
     }
 
+    let project_settings_path = project_claude_dir.join("settings.json");
+    if project_settings_path.exists() {
+        let content = fs::read_to_string(&project_settings_path)?;
+        if !content.trim().is_empty() {
+            if let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) {
+                let hook_command = project_hook_path.display().to_string();
+                if hook_already_present(&root, &hook_command) {
+                    println!("✅ Project settings.json: RTK hook configured");
+                } else {
+                    println!("⚠️  Project settings.json: exists but RTK hook not configured");
+                    println!("    Run: rtk init --auto-patch");
+                }
+            } else {
+                println!("⚠️  Project settings.json: exists but invalid JSON");
+            }
+        } else {
+            println!("⚪ Project settings.json: empty");
+        }
+    } else {
+        println!("⚪ Project settings.json: not found");
+    }
+
     if openclaw_plugin.exists() && openclaw_manifest.exists() {
         println!(
             "✅ OpenClaw: plugin installed at {}",
@@ -1222,14 +1307,18 @@ pub fn show_config() -> Result<()> {
     }
 
     println!("\nUsage:");
-    println!("  rtk init              # Full injection into local CLAUDE.md");
-    println!("  rtk init -g           # Hook + RTK.md + @RTK.md + settings.json (recommended)");
+    println!(
+        "  rtk init              # Project-local hook + RTK.md + @RTK.md + .claude/settings.json"
+    );
+    println!("  rtk init -g           # Hook + RTK.md + @RTK.md + ~/.claude/settings.json");
     println!("  rtk init -g --auto-patch    # Same as above but no prompt");
-    println!("  rtk init -g --no-patch      # Skip settings.json (manual setup)");
+    println!("  rtk init --no-patch         # Skip project settings.json patching (manual setup)");
     println!("  rtk init --openclaw         # Install OpenClaw exec rewrite plugin");
-    println!("  rtk init -g --uninstall     # Remove all RTK artifacts");
+    println!("  rtk init --uninstall        # Remove project-local RTK artifacts");
+    println!("  rtk init -g --uninstall     # Remove global RTK artifacts");
     println!("  rtk init -g --claude-md     # Legacy: full injection into ~/.claude/CLAUDE.md");
-    println!("  rtk init -g --hook-only     # Hook only, no RTK.md");
+    println!("  rtk init --hook-only        # Project-local hook only, no RTK.md");
+    println!("  rtk init -g --hook-only     # Global hook only, no RTK.md");
 
     Ok(())
 }
@@ -1237,7 +1326,33 @@ pub fn show_config() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    fn cwd_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("cwd test lock")
+    }
+
+    struct CurrentDirGuard {
+        original: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn new(path: &Path) -> Self {
+            let original = std::env::current_dir().expect("read current dir");
+            std::env::set_current_dir(path).expect("set current dir");
+            Self { original }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.original).expect("restore current dir");
+        }
+    }
 
     #[test]
     fn test_init_mentions_all_top_level_commands() {
@@ -1403,8 +1518,7 @@ More notes
     }
 
     #[test]
-    fn test_local_init_unchanged() {
-        // Local init should use claude-md mode
+    fn test_local_claude_md_mode_unchanged() {
         let temp = TempDir::new().unwrap();
         let claude_md = temp.path().join("CLAUDE.md");
 
@@ -1412,6 +1526,65 @@ More notes
         let content = fs::read_to_string(&claude_md).unwrap();
 
         assert!(content.contains("<!-- rtk-instructions"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_init_creates_project_local_hook_and_settings() {
+        let _lock = cwd_test_lock();
+        let temp = TempDir::new().unwrap();
+        let _cwd = CurrentDirGuard::new(temp.path());
+
+        run_default_mode(false, PatchMode::Auto, 0).unwrap();
+
+        let hook_path = temp.path().join(".claude/hooks/rtk-rewrite.sh");
+        let settings_path = temp.path().join(".claude/settings.json");
+        let rtk_md_path = temp.path().join("RTK.md");
+        let claude_md_path = temp.path().join("CLAUDE.md");
+
+        assert!(hook_path.exists());
+        assert!(settings_path.exists());
+        assert!(rtk_md_path.exists());
+        assert!(claude_md_path.exists());
+
+        let settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert!(hook_already_present(
+            &settings,
+            &hook_path.display().to_string()
+        ));
+
+        let claude_md = fs::read_to_string(&claude_md_path).unwrap();
+        assert!(claude_md.contains("@RTK.md"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_uninstall_removes_project_local_artifacts() {
+        let _lock = cwd_test_lock();
+        let temp = TempDir::new().unwrap();
+        let _cwd = CurrentDirGuard::new(temp.path());
+
+        run_default_mode(false, PatchMode::Auto, 0).unwrap();
+        uninstall(false, 0).unwrap();
+
+        let hook_path = temp.path().join(".claude/hooks/rtk-rewrite.sh");
+        let rtk_md_path = temp.path().join("RTK.md");
+        let claude_md_path = temp.path().join("CLAUDE.md");
+        let settings_path = temp.path().join(".claude/settings.json");
+
+        assert!(!hook_path.exists());
+        assert!(!rtk_md_path.exists());
+
+        let claude_md = fs::read_to_string(&claude_md_path).unwrap();
+        assert!(!claude_md.contains("@RTK.md"));
+
+        let settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+        assert!(!hook_already_present(
+            &settings,
+            &hook_path.display().to_string()
+        ));
     }
 
     // Tests for hook_already_present()
